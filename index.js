@@ -1,5 +1,7 @@
 import * as rollup from 'rollup';
 
+const worker = new Worker('worker.js');
+
 const modulePath = 'fake-path';
 const foo = `export default {
   foo: 'bar',
@@ -32,25 +34,42 @@ async function createBundle(from) {
   return code;
 }
 
-const code = await createBundle(foo); // UMD bundle of JS code
-const cache = await caches.open('foo-v1');
+async function addBundleToCache() {
+  const code = await createBundle(foo); // UMD bundle of JS code
+  const cache = await caches.open('v1');
 
-// Put in cache manually, so that a request to /foo/bar.js will give response with UMD code
-await cache.put(
-  new Request('/foo/bar.js'),
-  new Response(code, {
-    status: 200,
-    headers: {
-      'content-type': 'text/javascript',
-    },
-  }),
-);
+  // Put in cache manually, so that a request to /foo/bar.js will give response with UMD code
+  await cache.put(
+    new Request('/foo/bar.js'),
+    new Response(code, {
+      status: 200,
+      headers: {
+        'content-type': 'text/javascript',
+      },
+    }),
+  );
+}
 
-// Check if it's in cache
-const match = await cache.match('/foo/bar.js');
-const data = await match.text();
-// This all seems okay to me
-console.log(match, match.headers.get('content-type'), data);
+async function registerAndLoadSw() {
+  if ('serviceWorker' in navigator) {
+    const reg = await navigator.serviceWorker.register('./sw.js');
+    if (reg.active) {
+      return;
+    }
+    reg.addEventListener('updatefound', () => {
+      const newWorker = reg.installing;
+      newWorker.addEventListener('statechange', () => {
+        if (newWorker.state === 'activated') {
+          // force reload now that SW is activated and ready to intercept
+          // network requests and load from our (manually filled) cache
+          location.reload();
+        }
+      });
+    });
+  }
+}
 
-// 404 not found for worker trying to importScripts('foo/bar.js')
-const myWorker = new Worker('worker.js');
+await Promise.all([addBundleToCache(), registerAndLoadSw()]);
+
+// Now the worker can do importScripts to our cached JS string
+worker.postMessage('woof!');
