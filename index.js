@@ -56,20 +56,31 @@ async function registerAndLoadSw() {
     if (reg.active) {
       return;
     }
+
+    // If we are not active, we should wait until activation and then tell the SW
+    // to claim clients, so no reload is needed for the SW to serve from Cache
+    let promResolve;
+    const prom = new Promise((resolve) => {
+      promResolve = resolve;
+    });
     reg.addEventListener('updatefound', () => {
       const newWorker = reg.installing;
       newWorker.addEventListener('statechange', () => {
         if (newWorker.state === 'activated') {
-          // force reload now that SW is activated and ready to intercept
-          // network requests and load from our (manually filled) cache
-          location.reload();
+          newWorker.postMessage('clients-claim');
+          navigator.serviceWorker.addEventListener('message', (ev) => {
+            if (ev.data.msg === 'clients-claimed') {
+              promResolve();
+            }
+          });
         }
       });
     });
+    await prom;
   }
 }
 
-await Promise.all([addBundleToCache(), registerAndLoadSw()]);
-
-// Now the worker can do importScripts to our cached JS string
-worker.postMessage('woof!');
+await Promise.all([registerAndLoadSw(), addBundleToCache()]);
+// Clients should be claimed, so we should be able to tell the worker to importScripts
+// which will be served by SW from the Cache. Works in Firefox, not in Chrome.
+worker.postMessage('woof');

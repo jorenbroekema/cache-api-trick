@@ -1,3 +1,15 @@
+self.addEventListener('message', async (ev) => {
+  if (ev.data === 'clients-claim') {
+    await clients.claim();
+    // Tell clients we claimed clients so they can proceed to load
+    clients.matchAll().then((cls) =>
+      cls.forEach((client) => {
+        client.postMessage({ msg: 'clients-claimed' });
+      }),
+    );
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then(function (response) {
